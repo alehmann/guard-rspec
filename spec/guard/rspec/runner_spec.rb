@@ -48,6 +48,30 @@ describe Guard::RSpec::Runner do
       end
     end
 
+    context 'using multi_spork' do
+      subject { described_class.new(:multi_spork => true)}
+
+      it 'should only be used if multiple spec files are provided' do
+        subject.should_receive(:run_via_drb)
+        subject.run(['dummy'])
+
+        subject.should_receive(:run_via_multi_rspec)
+        subject.run(['dummy1', 'dummy2'])
+
+        subject.should_receive(:run_via_multi_rspec)
+        subject.run([File.dirname(__FILE__)])
+      end
+
+      it "should call multi_rspec" do
+        cmd =  nil
+        subject.should_receive(:system) { |arg| cmd = arg}
+
+        subject.run(['dummy1', 'dummy2'])
+
+        cmd.should =~ /bundle exec.*multi_rspec.*-r.*notification_rspec.*-f.*NotificationRSpec/
+      end
+    end
+
     context 'in RSpec 2 folder with Bundler' do
       before do
         Dir.stub(:pwd).and_return(@fixture_path.join('rspec2'))

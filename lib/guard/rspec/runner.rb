@@ -25,7 +25,9 @@ module Guard
 
         options = @options.merge(options)
 
-        if drb_used?
+        if multi_spork_used? and multiple_specs?(paths)
+          run_via_multi_rspec(paths, options)
+        elsif drb_used? or multi_spork_used?
           run_via_drb(paths, options)
         else
           run_via_shell(paths, options)
@@ -64,13 +66,29 @@ module Guard
 
     private
 
+      def rvm_cmd
+        "rvm #{@options[:rvm].join(',')} exec" if @options[:rvm].respond_to?(:join)
+      end
+
+      def bundle_exec_cmd
+        "bundle exec" if bundler?
+      end
+
+      def formatter_require_arg
+        "-r #{File.dirname(__FILE__)}/formatters/notification_#{rspec_class.downcase}.rb"
+      end
+
+      def formatter_class_arg
+        "-f Guard::RSpec::Formatter::Notification#{rspec_class}"
+      end
+
       def rspec_arguments(paths, options)
         arg_parts = []
         arg_parts << options[:cli]
         arg_parts << "-f progress" if !options[:cli] || options[:cli].split(/[\s=]/).none? { |w| %w[-f --format].include?(w) }
         if @options[:notification]
-          arg_parts << "-r #{File.dirname(__FILE__)}/formatters/notification_#{rspec_class.downcase}.rb"
-          arg_parts << "-f Guard::RSpec::Formatter::Notification#{rspec_class}#{rspec_version == 1 ? ":" : " --out "}/dev/null"
+          arg_parts << formatter_require_arg
+          arg_parts << "#{formatter_class_arg}#{rspec_version == 1 ? ":" : " --out "}/dev/null"
         end
         arg_parts << "--failure-exit-code #{FAILURE_EXIT_CODE}" if failure_exit_code_supported?
         arg_parts << paths.join(' ')
@@ -80,12 +98,30 @@ module Guard
 
       def rspec_command(paths, options)
         cmd_parts = []
-        cmd_parts << "rvm #{@options[:rvm].join(',')} exec" if @options[:rvm].respond_to?(:join)
-        cmd_parts << "bundle exec" if bundler?
+        cmd_parts << rvm_cmd
+        cmd_parts << bundle_exec_cmd
         cmd_parts << rspec_executable
         cmd_parts << rspec_arguments(paths, options)
 
         cmd_parts.compact.join(' ')
+      end
+
+      def run_via_multi_rspec(paths, options)
+        cmd_parts = []
+        cmd_parts << rvm_cmd
+        cmd_parts << bundle_exec_cmd
+        cmd_parts << "multi_rspec"
+        if @options[:notification]
+          cmd_parts << formatter_require_arg
+          cmd_parts << formatter_class_arg
+        end
+
+        cmd_parts << paths.join(' ')
+        cmd = cmd_parts.compact.join(' ')
+
+        success = system(cmd)
+
+        success
       end
 
       def run_via_shell(paths, options)
@@ -119,6 +155,19 @@ module Guard
       rescue DRb::DRbConnError
         # Fall back to the shell runner; we don't want to mangle the environment!
         run_via_shell(paths, options)
+      end
+
+      def multiple_specs?(paths)
+        paths.count > 1 or Dir["#{paths.first}/**/*_spec.rb"].count > 1
+      end
+
+      def multi_spork_used?
+        if @multi_spork_used.nil?
+          @multi_spork_used = (@options[:multi_spork] == true)
+          @multi_spork_used
+        else
+          @multi_spork_used
+        end
       end
 
       def drb_used?
